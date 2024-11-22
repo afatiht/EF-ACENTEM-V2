@@ -1,18 +1,22 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { User, Car, FileText, Upload, ArrowLeft, Trash2, Edit2, Save, X, FileIcon } from 'lucide-react';
+import { User, Car, FileText, Upload, ArrowLeft, Trash2, Edit2, Save, X, FileIcon, MessageSquare, History } from 'lucide-react';
 import { db } from '../db';
-import type { Customer, Vehicle, Policy, CustomerDocument } from '../types';
+import { useAuthStore } from '../store/authStore';
+import type { Customer, Vehicle, Policy, CustomerDocument, CustomerNote } from '../types';
 
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const user = useAuthStore(state => state.user);
   const [uploadType, setUploadType] = useState<CustomerDocument['type']>('identity');
   const [documentName, setDocumentName] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [editingPolicyId, setEditingPolicyId] = useState<string | null>(null);
+  const [showOldNotes, setShowOldNotes] = useState(false);
+  const [newNote, setNewNote] = useState('');
   
   const customer = useLiveQuery(() => db.customers.get(id!));
   const vehicles = useLiveQuery(() => db.vehicles.where('customerId').equals(id!).toArray()) ?? [];
@@ -29,6 +33,30 @@ export default function CustomerDetail() {
   }, [customer]);
 
   if (!customer || !editedCustomer) return null;
+
+  const getDateStatus = (date: string) => {
+    const targetDate = new Date(date);
+    const today = new Date();
+    const diffTime = targetDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays <= 30 && diffDays >= 0) {
+      const color = diffDays > 19 ? 'text-orange-600' : 
+                   diffDays > 9 ? 'text-yellow-600' : 
+                   'text-red-600';
+      return {
+        isClose: true,
+        days: diffDays,
+        color
+      };
+    }
+    
+    return {
+      isClose: false,
+      days: diffDays,
+      color: 'text-gray-600'
+    };
+  };
 
   const handleSaveCustomer = async () => {
     await db.customers.update(id!, editedCustomer);
@@ -108,11 +136,32 @@ export default function CustomerDetail() {
     }
   };
 
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return;
+
+    const newNoteObj: CustomerNote = {
+      id: crypto.randomUUID(),
+      content: newNote,
+      createdBy: user?.name || user?.email || 'Bilinmiyor',
+      userEmail: user?.email || 'Bilinmiyor',
+      createdAt: new Date().toISOString()
+    };
+
+    const notes = customer.notes || [];
+    await db.customers.update(customer.id, {
+      notes: [newNoteObj, ...notes]
+    });
+    setNewNote('');
+  };
+
   const documentTypeLabels: Record<CustomerDocument['type'], string> = {
     'identity': 'Kimlik',
     'vehicle-registration': 'Ruhsat',
     'other': 'Diğer'
   };
+
+  const currentNotes = customer.notes?.slice(0, 3) || [];
+  const oldNotes = customer.notes?.slice(3) || [];
 
   return (
     <div className="space-y-6">
@@ -166,6 +215,17 @@ export default function CustomerDetail() {
           {editMode ? (
             <div className="space-y-3">
               <div>
+                <label className="block text-sm font-medium text-gray-700">Müşteri Tipi</label>
+                <select
+                  value={editedCustomer.type || 'individual'}
+                  onChange={(e) => setEditedCustomer({...editedCustomer, type: e.target.value as 'individual' | 'corporate'})}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                >
+                  <option value="individual">Bireysel</option>
+                  <option value="corporate">Kurumsal</option>
+                </select>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700">Ad</label>
                 <input
                   type="text"
@@ -204,82 +264,88 @@ export default function CustomerDetail() {
             </div>
           ) : (
             <div className="space-y-3">
+              <p><span className="font-medium">Müşteri Tipi:</span> {editedCustomer.type === 'individual' ? 'Bireysel' : 'Kurumsal'}</p>
               <p><span className="font-medium">Ad:</span> {customer.firstName}</p>
               <p><span className="font-medium">Soyad:</span> {customer.lastName}</p>
               <p><span className="font-medium">TC Kimlik No:</span> {customer.identityNumber}</p>
               <p><span className="font-medium">Telefon:</span> {customer.phone}</p>
             </div>
           )}
-        </div>
 
-        {/* Dökümanlar */}
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-4">
-            <FileText className="w-5 h-5 text-blue-600" />
-            Dökümanlar
-          </h2>
-          
-          <div className="flex gap-2 mb-4">
-            <select
-              value={uploadType}
-              onChange={(e) => setUploadType(e.target.value as CustomerDocument['type'])}
-              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            >
-              <option value="identity">Kimlik</option>
-              <option value="vehicle-registration">Ruhsat</option>
-              <option value="other">Diğer</option>
-            </select>
+          {/* Notlar Bölümü */}
+          <div className="mt-6 border-t pt-4">
+            <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-4">
+              <MessageSquare className="w-5 h-5 text-blue-600" />
+              Notlar
+            </h3>
             
-            <input
-              type="text"
-              placeholder="Belge Adı (Opsiyonel)"
-              value={documentName}
-              onChange={(e) => setDocumentName(e.target.value)}
-              className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            />
-            
-            <label className="flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 cursor-pointer">
-              <Upload className="w-4 h-4 mr-2" />
-              Döküman Yükle
-              <input
-                type="file"
-                accept=".pdf,image/*"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-            </label>
-          </div>
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  placeholder="Yeni not ekle..."
+                  className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+                <button
+                  onClick={handleAddNote}
+                  disabled={!newNote.trim()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                >
+                  Ekle
+                </button>
+              </div>
 
-          <div className="space-y-3">
-            {customer.documents?.map(doc => (
-              <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
-                <div className="flex items-center gap-2">
-                  <FileIcon className="w-5 h-5 text-gray-500" />
-                  <div>
-                    <p className="font-medium">{doc.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {documentTypeLabels[doc.type]} - {new Date(doc.uploadDate).toLocaleDateString('tr-TR')}
-                    </p>
+              {currentNotes.map(note => (
+                <div key={note.id} className="bg-gray-50 p-3 rounded-md">
+                  <p className="text-gray-800">{note.content}</p>
+                  <div className="mt-2 text-sm text-gray-500 flex justify-between">
+                    <span>{note.createdBy}</span>
+                    <span>{new Date(note.createdAt).toLocaleString('tr-TR')}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <a
-                    href={doc.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800"
-                  >
-                    Görüntüle
-                  </a>
+              ))}
+
+              {oldNotes.length > 0 && (
+                <div>
                   <button
-                    onClick={() => handleDeleteDocument(doc.id)}
-                    className="text-red-600 hover:text-red-800"
+                    onClick={() => setShowOldNotes(!showOldNotes)}
+                    className="flex items-center text-blue-600 hover:text-blue-800"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <History className="w-4 h-4 mr-1" />
+                    Eski Notlar ({oldNotes.length})
                   </button>
+
+                  {showOldNotes && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                      <div className="bg-white p-6 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                          <h3 className="text-lg font-semibold">Eski Notlar</h3>
+                          <button
+                            onClick={() => setShowOldNotes(false)}
+                            className="text-gray-500 hover:text-gray-700"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                        <div className="space-y-4">
+                          {oldNotes.map(note => (
+                            <div key={note.id} className="bg-gray-50 p-3 rounded-md">
+                              <p className="text-gray-800">{note.content}</p>
+                              <div className="mt-2 text-sm text-gray-500 flex justify-between">
+                                <span>{note.createdBy}</span>
+                                <span>{new Date(note.createdAt).toLocaleString('tr-TR')}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
         </div>
 
@@ -381,8 +447,10 @@ export default function CustomerDetail() {
                         Şasi No: {vehicle.chassisNumber}
                       </p>
                       {vehicle.inspectionDate && (
-                        <p className="text-sm text-gray-600">
+                        <p className={`text-sm ${getDateStatus(vehicle.inspectionDate).color}`}>
                           Muayene: {new Date(vehicle.inspectionDate).toLocaleDateString('tr-TR')}
+                          {getDateStatus(vehicle.inspectionDate).isClose && 
+                            ` (${getDateStatus(vehicle.inspectionDate).days} gün kaldı)`}
                         </p>
                       )}
                     </div>
@@ -499,9 +567,11 @@ export default function CustomerDetail() {
                         <p className="text-sm text-gray-600">
                           {policy.type === 'traffic' ? 'Trafik Sigortası' : 'Kasko'}
                         </p>
-                        <p className="text-sm text-gray-600">
+                        <p className={`text-sm ${getDateStatus(policy.endDate).color}`}>
                           {new Date(policy.startDate).toLocaleDateString('tr-TR')} -
                           {new Date(policy.endDate).toLocaleDateString('tr-TR')}
+                          {getDateStatus(policy.endDate).isClose && 
+                            ` (${getDateStatus(policy.endDate).days} gün kaldı)`}
                         </p>
                         <p className="font-medium mt-1">{policy.price.toLocaleString('tr-TR')} TL</p>
                       </div>
@@ -524,6 +594,76 @@ export default function CustomerDetail() {
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        {/* Dökümanlar */}
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2 mb-4">
+            <FileText className="w-5 h-5 text-blue-600" />
+            Dökümanlar
+          </h2>
+          
+          <div className="flex gap-2 mb-4">
+            <select
+              value={uploadType}
+              onChange={(e) => setUploadType(e.target.value as CustomerDocument['type'])}
+              className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            >
+              <option value="identity">Kimlik</option>
+              <option value="vehicle-registration">Ruhsat</option>
+              <option value="other">Diğer</option>
+            </select>
+            
+            <input
+              type="text"
+              placeholder="Belge Adı (Opsiyonel)"
+              value={documentName}
+              onChange={(e) => setDocumentName(e.target.value)}
+              className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            />
+            
+            <label className="flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 cursor-pointer">
+              <Upload className="w-4 h-4 mr-2" />
+              Döküman Yükle
+              <input
+                type="file"
+                accept=".pdf,image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            {customer.documents?.map(doc => (
+              <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
+                <div className="flex items-center gap-2">
+                  <FileIcon className="w-5 h-5 text-gray-500" />
+                  <div>
+                    <p className="font-medium">{doc.name}</p>
+                    <p className="text-sm text-gray-500"> {documentTypeLabels[doc.type]} - {new Date(doc.uploadDate).toLocaleDateString('tr-TR')}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={doc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    Görüntüle
+                  </a>
+                  <button
+                    onClick={() => handleDeleteDocument(doc.id)}
+                    className="text-red-600 hover:text-red-800"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

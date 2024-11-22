@@ -6,13 +6,23 @@ export interface User {
   assignedCustomerId?: string;
 }
 
+export interface CustomerNote {
+  id: string;
+  content: string;
+  createdBy: string;
+  createdAt: string;
+  userEmail: string;
+}
+
 export interface Customer {
   id: string;
   firstName: string;
   lastName: string;
   identityNumber: string;
   phone: string;
+  type: 'individual' | 'corporate';
   documents?: CustomerDocument[];
+  notes?: CustomerNote[];
   assignedUserId?: string;
 }
 
