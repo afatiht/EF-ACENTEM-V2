@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { db } from '../db';
 import type { Database } from '../types/supabase';
 
 type Tables = keyof Database['public']['Tables'];
@@ -16,7 +17,10 @@ export async function insertItem<T extends Tables>(
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error(`Error inserting into ${table}:`, error);
+    throw error;
+  }
   return result;
 }
 
@@ -32,7 +36,10 @@ export async function updateItem<T extends Tables>(
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error(`Error updating ${table}:`, error);
+    throw error;
+  }
   return result;
 }
 
@@ -45,68 +52,92 @@ export async function deleteItem<T extends Tables>(
     .delete()
     .eq('id', id);
 
-  if (error) throw error;
+  if (error) {
+    console.error(`Error deleting from ${table}:`, error);
+    throw error;
+  }
 }
 
-export async function migrateFromDexie(dexieData: {
-  customers?: any[];
-  vehicles?: any[];
-  policies?: any[];
-  users?: any[];
-}) {
+let isSyncing = false;
+
+export async function syncWithSupabase() {
+  if (isSyncing) return;
+  
   try {
-    if (dexieData.customers?.length) {
-      const { error: customersError } = await supabase
-        .from('customers')
-        .insert(dexieData.customers.map(customer => ({
-          ...customer,
-          first_name: customer.firstName,
-          last_name: customer.lastName,
-          identity_number: customer.identityNumber,
-          assigned_user_id: customer.assignedUserId
-        })));
-      if (customersError) throw customersError;
-    }
+    isSyncing = true;
+    
+    // Fetch all data from Supabase
+    const { data: customers, error: customersError } = await supabase
+      .from('customers')
+      .select('*');
+    if (customersError) throw customersError;
 
-    if (dexieData.vehicles?.length) {
-      const { error: vehiclesError } = await supabase
-        .from('vehicles')
-        .insert(dexieData.vehicles.map(vehicle => ({
-          ...vehicle,
-          customer_id: vehicle.customerId,
-          chassis_number: vehicle.chassisNumber,
-          inspection_date: vehicle.inspectionDate
-        })));
-      if (vehiclesError) throw vehiclesError;
-    }
+    const { data: vehicles, error: vehiclesError } = await supabase
+      .from('vehicles')
+      .select('*');
+    if (vehiclesError) throw vehiclesError;
 
-    if (dexieData.policies?.length) {
-      const { error: policiesError } = await supabase
-        .from('policies')
-        .insert(dexieData.policies.map(policy => ({
-          ...policy,
-          customer_id: policy.customerId,
-          vehicle_id: policy.vehicleId,
-          start_date: policy.startDate,
-          end_date: policy.endDate,
-          policy_number: policy.policyNumber
-        })));
-      if (policiesError) throw policiesError;
-    }
+    const { data: policies, error: policiesError } = await supabase
+      .from('policies')
+      .select('*');
+    if (policiesError) throw policiesError;
 
-    if (dexieData.users?.length) {
-      const { error: usersError } = await supabase
-        .from('users')
-        .insert(dexieData.users.map(user => ({
-          ...user,
-          assigned_customer_id: user.assignedCustomerId
+    // Convert and update local database
+    await db.transaction('rw', [db.customers, db.vehicles, db.policies], async () => {
+      // Clear existing data
+      await Promise.all([
+        db.customers.clear(),
+        db.vehicles.clear(),
+        db.policies.clear()
+      ]);
+
+      // Add new data
+      if (customers) {
+        await db.customers.bulkAdd(customers.map(c => ({
+          id: c.id,
+          firstName: c.first_name,
+          lastName: c.last_name,
+          identityNumber: c.identity_number,
+          phone: c.phone,
+          type: c.type,
+          assignedUserId: c.assigned_user_id,
+          documents: c.documents,
+          notes: c.notes
         })));
-      if (usersError) throw usersError;
-    }
+      }
+
+      if (vehicles) {
+        await db.vehicles.bulkAdd(vehicles.map(v => ({
+          id: v.id,
+          plate: v.plate,
+          brand: v.brand,
+          model: v.model,
+          year: v.year,
+          chassisNumber: v.chassis_number,
+          customerId: v.customer_id,
+          inspectionDate: v.inspection_date
+        })));
+      }
+
+      if (policies) {
+        await db.policies.bulkAdd(policies.map(p => ({
+          id: p.id,
+          customerId: p.customer_id,
+          vehicleId: p.vehicle_id,
+          startDate: p.start_date,
+          endDate: p.end_date,
+          price: p.price,
+          type: p.type,
+          policyNumber: p.policy_number
+        })));
+      }
+    });
 
     return true;
   } catch (error) {
-    console.error('Migration error:', error);
+    console.error('Sync error:', error);
     return false;
+  } finally {
+    isSyncing = false;
   }
 }

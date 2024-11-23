@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Shield, List, Users, LineChart, PlusCircle, UserCog } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuthStore } from './store/authStore';
+import { syncWithSupabase } from './services/supabaseService';
 import Login from './components/Auth/Login';
 import PendingApproval from './components/Auth/PendingApproval';
 import UserManagement from './components/Auth/UserManagement';
@@ -128,6 +129,11 @@ function MainContent() {
     }
     return db.policies.toArray();
   }) ?? [];
+
+  // Initial sync with Supabase
+  useEffect(() => {
+    syncWithSupabase().catch(console.error);
+  }, []);
 
   const handleAddCustomer = async (customerData: Omit<Customer, 'id'>) => {
     const id = crypto.randomUUID();
