@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Shield, List, Users, LineChart, PlusCircle, UserCog } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -17,6 +17,16 @@ import CustomerList from './components/CustomerList';
 import CustomerDetail from './components/CustomerDetail';
 import { db } from './db';
 import type { Customer, Vehicle, Policy } from './types';
+
+export const SyncContext = React.createContext<{
+  isSyncing: boolean;
+  lastSyncTime: Date | null;
+  syncError: Error | null;
+}>({
+  isSyncing: false,
+  lastSyncTime: null,
+  syncError: null
+});
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const user = useAuthStore(state => state.user);
@@ -88,13 +98,52 @@ function Navigation() {
 }
 
 function Layout({ children }: { children: React.ReactNode }) {
+  const [syncState, setSyncState] = useState({
+    isSyncing: false,
+    lastSyncTime: null as Date | null,
+    syncError: null as Error | null
+  });
+
+  useEffect(() => {
+    const syncData = async () => {
+      try {
+        setSyncState(prev => ({ ...prev, isSyncing: true }));
+        await syncWithSupabase();
+        setSyncState(prev => ({
+          ...prev,
+          isSyncing: false,
+          lastSyncTime: new Date(),
+          syncError: null
+        }));
+      } catch (error) {
+        setSyncState(prev => ({
+          ...prev,
+          isSyncing: false,
+          syncError: error as Error
+        }));
+      }
+    };
+
+    syncData();
+    const interval = setInterval(syncData, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      <Navigation />
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        {children}
-      </main>
-    </div>
+    <SyncContext.Provider value={syncState}>
+      <div className="min-h-screen bg-gray-100">
+        <Navigation />
+        <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+          {syncState.syncError && (
+            <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+              <strong className="font-bold">Senkronizasyon Hatası!</strong>
+              <span className="block sm:inline"> {syncState.syncError.message}</span>
+            </div>
+          )}
+          {children}
+        </main>
+      </div>
+    </SyncContext.Provider>
   );
 }
 
@@ -129,11 +178,6 @@ function MainContent() {
     }
     return db.policies.toArray();
   }) ?? [];
-
-  // Initial sync with Supabase
-  useEffect(() => {
-    syncWithSupabase().catch(console.error);
-  }, []);
 
   const handleAddCustomer = async (customerData: Omit<Customer, 'id'>) => {
     const id = crypto.randomUUID();
