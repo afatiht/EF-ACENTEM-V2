@@ -1,20 +1,13 @@
 {
-  "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
-  ],
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
   "env": {
     "VITE_SUPABASE_URL": "https://enlgvuuqpvytyhcwgccy.supabase.co",
     "VITE_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVubGd2dXVxcHZ5dHloY3dnY2N5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzIzMTc2NzMsImV4cCI6MjA0Nzg5MzY3M30.rcqGMVgDbdW8faN_YKqpiinDMk39_0IikbkbmPHJipA"
